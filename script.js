@@ -1,11 +1,21 @@
 import Panzoom from 'https://cdn.jsdelivr.net/npm/@panzoom/panzoom@4/+esm';
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const viewport = document.getElementById('viewport');
     const content  = document.getElementById('content');
 
     if (!content) {
         console.error('Элемент #content не найден в DOM');
+        return;
+    }
+
+    // Ждём, пока SVG получит реальные размеры — иначе Panzoom стартует «вхолостую»
+    try {
+        if (!content.complete || content.naturalWidth === 0) {
+            await content.decode();
+        }
+    } catch (err) {
+        console.error('Не удалось загрузить tree.svg', err);
         return;
     }
 
