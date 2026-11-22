@@ -19,14 +19,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
+    const MIN_SCALE = 0.3;
+    const MAX_SCALE = 6;
+
     const pz = Panzoom(content, {
-        minScale: 0.3,
-        maxScale: 6,
+        minScale: MIN_SCALE,
+        maxScale: MAX_SCALE,
         cursor: 'grab',
         contain: 'outside',
     });
 
-    viewport.addEventListener('wheel', pz.zoomWithWheel, { passive: false });
+    /* ==================== ПЛАВНЫЙ ЗУМ (ЛЕРП) ==================== */
+
+    const ZOOM_SPEED  = 0.0015; // чувствительность колеса
+    const ZOOM_LERP   = 0.15;   // доля пути к цели за ~кадр (60 fps): меньше = плавнее
+    const ZOOM_EPS    = 0.001;  // порог, при котором считаем, что цель достигнута
+
+    let targetScale = pz.getScale();
+    let zoomFocal   = { clientX: 0, clientY: 0 };
+    let zoomRafId   = null;
+    let zoomLast    = 0;
+
+    const zoomStep = (now) => {
+        const dt      = Math.min(now - zoomLast, 50); // защита от больших скачков
+        zoomLast      = now;
+        const current = pz.getScale();
+        const diff    = targetScale - current;
+
+        if (Math.abs(diff) < ZOOM_EPS) {
+            pz.zoomToPoint(targetScale, zoomFocal, { animate: false });
+            zoomRafId = null;
+            return;
+        }
+
+        // Независимый от частоты кадров лерп
+        const k    = 1 - Math.pow(1 - ZOOM_LERP, dt / 16.667);
+        const next = current + diff * k;
+
+        pz.zoomToPoint(next, zoomFocal, { animate: false });
+
+        // Если Panzoom ограничил масштаб (contain: 'outside'), не гонимся за недостижимой целью
+        if (Math.abs(pz.getScale() - next) > 1e-4) {
+            targetScale = pz.getScale();
+        }
+
+        zoomRafId = requestAnimationFrame(zoomStep);
+    };
+
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+
+        // Нормализация deltaY для разных режимов прокрутки
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) delta *= 16;       // строки
+        else if (e.deltaMode === 2) delta *= 100; // страницы
+
+        // Если анимация не идёт — стартуем от текущего масштаба
+        if (zoomRafId === null) targetScale = pz.getScale();
+
+        targetScale *= Math.exp(-delta * ZOOM_SPEED);
+        targetScale  = Math.min(MAX_SCALE, Math.max(MIN_SCALE, targetScale));
+
+        zoomFocal = { clientX: e.clientX, clientY: e.clientY };
+
+        if (zoomRafId === null) {
+            zoomLast  = performance.now();
+            zoomRafId = requestAnimationFrame(zoomStep);
+        }
+    }, { passive: false });
 
     /* ==================== ИНЕРЦИЯ ==================== */
 
